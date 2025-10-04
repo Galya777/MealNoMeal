@@ -8,8 +8,10 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -32,11 +34,12 @@ type Game struct {
 	trayValues       []int
 	trayReplaced     []int    // if tray had an item, stores the numeric value removed
 	itemNames        []string // "" if none
+	itemImages       []int    // food cartoon image IDs for items
 	playerTray       int
 	playerTrayButton *widget.Button // visual representation of player's tray
 	openedTraysCount int
 	openedValues     map[int]bool
-	banker           *Banker
+	chef             *Chef
 	bonus            *BonusManager
 	bonusOffered     bool // track if bonus has been offered this game
 }
@@ -44,11 +47,60 @@ type Game struct {
 func NewGame() *Game {
 	return &Game{
 		playerTray:   -1,
-		banker:       NewBanker(),
+		chef:         NewChef(),
 		bonus:        NewBonusManager(),
 		openedValues: make(map[int]bool),
 		bonusOffered: false,
 	}
+}
+
+// Helper function to load image from file with better error handling
+func loadImageSafe(filename string, width, height float32) fyne.CanvasObject {
+	uri := storage.NewFileURI("images/" + filename)
+	img := canvas.NewImageFromURI(uri)
+
+	// Check if image loaded successfully
+	if img == nil {
+		// Return placeholder if image fails to load
+		return widget.NewLabel(fmt.Sprintf("Image: %s", filename))
+	}
+
+	img.FillMode = canvas.ImageFillContain
+	img.SetMinSize(fyne.NewSize(width, height))
+	return img
+}
+
+// Update the old loadImage function to use the safe version
+func loadImage(filename string, width, height float32) *canvas.Image {
+	uri := storage.NewFileURI("images/" + filename)
+	img := canvas.NewImageFromURI(uri)
+	img.FillMode = canvas.ImageFillContain
+	img.SetMinSize(fyne.NewSize(width, height))
+	return img
+}
+
+// Helper function to get the closest value image for an offer
+func (g *Game) getOfferImageID(offer int) int {
+	// Find the closest value in VALUES array
+	closestIdx := 0
+	minDiff := abs(VALUES[0] - offer)
+
+	for i := 1; i < len(VALUES); i++ {
+		diff := abs(VALUES[i] - offer)
+		if diff < minDiff {
+			minDiff = diff
+			closestIdx = i
+		}
+	}
+
+	return closestIdx + 1 // Return 1-based index for image naming
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 func (g *Game) initialize() {
@@ -66,6 +118,7 @@ func (g *Game) initialize() {
 
 	// init arrays
 	g.itemNames = make([]string, NUM_TRAYS)
+	g.itemImages = make([]int, NUM_TRAYS)
 	g.trayReplaced = make([]int, NUM_TRAYS)
 	for i := range g.trayReplaced {
 		g.trayReplaced[i] = -1
@@ -76,7 +129,8 @@ func (g *Game) initialize() {
 	replace := map[int]bool{}
 	for len(replace) < numItems {
 		idx := r.Intn(NUM_TRAYS)
-		if idx == 0 || idx == NUM_TRAYS-1 {
+		// Skip if this tray contains lowest or highest value
+		if g.trayValues[idx] == VALUES[0] || g.trayValues[idx] == VALUES[len(VALUES)-1] {
 			continue
 		}
 		if !replace[idx] {
@@ -84,16 +138,35 @@ func (g *Game) initialize() {
 		}
 	}
 
-	// Food-themed items pool
-	pool := []string{
-		"🍕 Pizza", "🍔 Burger", "🍟 Fries", "🌮 Taco", "🍝 Pasta", "🍣 Sushi",
-		"🍰 Cake", "🍦 Ice Cream", "🥗 Salad", "🍗 Chicken", "🥩 Steak", "🍤 Shrimp",
-		"🌭 Hot Dog", "🥪 Sandwich", "🍜 Ramen", "🍱 Bento Box", "🧀 Cheese Platter", "🥘 Paella",
+	// Food-themed items pool (cartoon food images: 51-100)
+	foodItems := []struct {
+		name    string
+		imageID int
+	}{
+		{"Beigners", 51},
+		{"Cheese Sandwich", 52},
+		{"Magic cookies", 53},
+		{"Ultimate sandwich", 54},
+		{"Pretty patty", 55},
+		{"hors d'oeuvres", 56},
+		{"Nacco", 57},
+		{"Krabby patty", 58},
+		{"jr. patty", 59},
+		{"Poritage", 60},
+		{"Hot Dog", 61},
+		{"Ramen", 62},
+		{"Chilli fries", 63},
+		{"Ultimate Sandwich", 64},
+		{"Spanish puffs", 65},
+		{"Turkey", 66},
+		{"Dreamy breakfast", 67},
+		{"ratatouille", 68},
 	}
 
 	for idx := range replace {
-		name := pool[r.Intn(len(pool))]
-		g.itemNames[idx] = name
+		food := foodItems[r.Intn(len(foodItems))]
+		g.itemNames[idx] = food.name
+		g.itemImages[idx] = food.imageID
 		g.trayReplaced[idx] = g.trayValues[idx]
 		g.trayValues[idx] = -1 // mark as item
 	}
@@ -122,13 +195,13 @@ func (g *Game) initialize() {
 	for i := 0; i < half; i++ {
 		ltext := fmt.Sprintf("$%d", display[i])
 		if display[i] == -999999 {
-			ltext = "🍽️ FOOD ITEM"
+			ltext = "🍔 FOOD ITEM"
 		}
 		g.leftLabels[i] = widget.NewLabel(ltext)
 
 		rtext := fmt.Sprintf("$%d", display[i+half])
 		if display[i+half] == -999999 {
-			rtext = "🍽️ FOOD ITEM"
+			rtext = "🍔 FOOD ITEM"
 		}
 		g.rightLabels[i] = widget.NewLabel(rtext)
 	}
@@ -211,25 +284,56 @@ func (g *Game) onTrayClicked(a fyne.App, idx int) {
 	g.gridButtons[idx].Disable()
 	g.openedTraysCount++
 
-	var contentText string
+	// Show tray opened dialog with image
+	g.showTrayOpenedDialog(w, idx)
+}
+
+func (g *Game) showTrayOpenedDialog(parent fyne.Window, idx int) {
+	var contentWidget fyne.CanvasObject
+
 	if g.itemNames[idx] != "" {
-		contentText = fmt.Sprintf("🍽️ You opened Tray %d\nIt contained: %s", idx+1, g.itemNames[idx])
+		// Show food item with cartoon image
+		foodImg := loadImage(fmt.Sprintf("%d.jpg", g.itemImages[idx]), 200, 200)
+		label := widget.NewLabel(fmt.Sprintf("🍽️ Tray %d contains:\n%s", idx+1, g.itemNames[idx]))
+		contentWidget = container.NewVBox(
+			container.NewCenter(foodImg),
+			container.NewCenter(label),
+		)
 	} else {
-		contentText = fmt.Sprintf("🍽️ You opened Tray %d\nIt contained: $%d", idx+1, g.trayValues[idx])
+		// Show money value with corresponding image (1-26)
+		// Find which position this value is in the VALUES array
+		valueIndex := -1
+		for i, v := range VALUES {
+			if v == g.trayValues[idx] {
+				valueIndex = i + 1 // 1-based for image naming
+				break
+			}
+		}
+
+		if valueIndex > 0 {
+			moneyImg := loadImage(fmt.Sprintf("%d.jpg", valueIndex), 200, 200)
+			label := widget.NewLabel(fmt.Sprintf("🍽️ Tray %d contains:\n$%d", idx+1, g.trayValues[idx]))
+			contentWidget = container.NewVBox(
+				container.NewCenter(moneyImg),
+				container.NewCenter(label),
+			)
+		} else {
+			// Fallback if image not found
+			contentWidget = widget.NewLabel(fmt.Sprintf("🍽️ Tray %d contains:\n$%d", idx+1, g.trayValues[idx]))
+		}
 	}
 
-	// Show tray opened dialog, then proceed with banker offer in callback
-	d := dialog.NewInformation("Tray Opened", contentText, w)
+	d := dialog.NewCustom("Tray Opened", "OK", contentWidget, parent)
 	d.SetOnClosed(func() {
 		// mark sidebar
 		g.markPriceAsOpened(idx)
 
-		// Check if it's time for banker offer (every 3 trays)
+		// Check if it's time for chef offer (every 3 trays)
 		if g.openedTraysCount%3 == 0 {
-			g.showBankerOffer(w)
+			g.showChefOffer(parent)
 		} else if g.getUnopenedCount() == 1 {
 			// final reveal when 1 left (not including player's tray)
-			g.showFinalReveal(w)
+			g.showFinalReveal(parent)
 		}
 	})
 	d.Show()
@@ -284,13 +388,12 @@ func (g *Game) getUnopenedCount() int {
 	return count
 }
 
-func (g *Game) showBankerOffer(parent fyne.Window) {
+func (g *Game) showChefOffer(parent fyne.Window) {
 	// Check if final reveal
 	if g.getUnopenedCount() == 1 {
 		g.showFinalReveal(parent)
 		return
 	}
-
 	remaining := []int{}
 	// Include player's tray in remaining values
 	for i := 0; i < NUM_TRAYS; i++ {
@@ -307,17 +410,17 @@ func (g *Game) showBankerOffer(parent fyne.Window) {
 		return
 	}
 
-	// Trigger bonuses ONLY ONCE per game at a random banker offer
+	// Trigger bonuses ONLY ONCE per game at a random chef offer
 	// 30% chance to trigger bonus if not already offered
-	if !g.bonusOffered && g.banker.r.Float64() < 0.30 {
+	if !g.bonusOffered && g.chef.r.Float64() < 0.30 {
 		g.bonusOffered = true
-		// Show bonuses BEFORE banker offer
+		// Show bonuses BEFORE chef offer
 		g.showBonusSequence(parent, remaining)
 		return
 	}
 
-	// Normal banker offer flow (no bonus)
-	if g.banker.OfferSwap() {
+	// Normal chef offer flow (no bonus)
+	if g.chef.OfferSwap() {
 		// Create buttons with symbols
 		acceptBtn := widget.NewButton("✓ Accept", nil)
 		declineBtn := widget.NewButton("✗ Decline", nil)
@@ -348,75 +451,50 @@ func (g *Game) showBankerOffer(parent fyne.Window) {
 		return
 	}
 
-	offer := g.banker.CalculateOffer(remaining)
+	offer := g.chef.CalculateOffer(remaining)
 
 	// Show the offer dialog
 	g.showOfferDialog(parent, offer)
+
 }
 
-// Show bonuses in sequence BEFORE banker offer
+// Show bonuses in sequence BEFORE chef offer
 func (g *Game) showBonusSequence(parent fyne.Window, remaining []int) {
 	hasMultiplier := g.bonus.HasMultiplier()
 	hasAdditive := g.bonus.HasAdditive()
 
 	if hasMultiplier && hasAdditive {
-		// Show multiplier first, then additive, then banker offer
+		// Show multiplier first, then additive, then chef offer
 		g.bonus.TriggerMultiplierWithCallback(parent, func() {
 			g.bonus.TriggerAdditiveWithCallback(parent, func() {
-				// After both bonuses, proceed with banker offer
-				g.proceedWithBankerOffer(parent, remaining)
+				// After both bonuses, proceed with chef offer
+				g.proceedWithChefOffer(parent, remaining)
 			})
 		})
 	} else if hasMultiplier {
-		// Show multiplier, then banker offer
+		// Show multiplier, then chef offer
 		g.bonus.TriggerMultiplierWithCallback(parent, func() {
-			g.proceedWithBankerOffer(parent, remaining)
+			g.proceedWithChefOffer(parent, remaining)
 		})
 	} else if hasAdditive {
-		// Show additive, then banker offer
+		// Show additive, then chef offer
 		g.bonus.TriggerAdditiveWithCallback(parent, func() {
-			g.proceedWithBankerOffer(parent, remaining)
+			g.proceedWithChefOffer(parent, remaining)
 		})
 	} else {
 		// No bonuses available, proceed directly
-		g.proceedWithBankerOffer(parent, remaining)
+		g.proceedWithChefOffer(parent, remaining)
 	}
 }
 
-func (g *Game) proceedWithBankerOffer(parent fyne.Window, remaining []int) {
-	// If banker proposes swap
-	if g.banker.OfferSwap() {
-		// Create buttons with symbols
-		acceptBtn := widget.NewButton("✓ Accept", nil)
-		declineBtn := widget.NewButton("✗ Decline", nil)
-
-		// Set colors: Accept = Blue, Decline = Grey
-		acceptBtn.Importance = widget.HighImportance    // Blue
-		declineBtn.Importance = widget.MediumImportance // Grey
-
-		content := widget.NewLabel("🍽️ The Banker offers to swap your tray with another unopened one. Swap?")
-		// Accept on LEFT, Decline on RIGHT
-		buttons := container.NewHBox(acceptBtn, declineBtn)
-		dialogContent := container.NewVBox(content, buttons)
-
-		dlg := dialog.NewCustomWithoutButtons("Banker's Offer", dialogContent, parent)
-
-		// Accept button = do the swap
-		acceptBtn.OnTapped = func() {
-			dlg.Hide()
-			g.swapTray(parent)
-		}
-
-		// Decline button = don't swap
-		declineBtn.OnTapped = func() {
-			dlg.Hide()
-		}
-
-		dlg.Show()
+func (g *Game) proceedWithChefOffer(parent fyne.Window, remaining []int) {
+	// If chef proposes swap
+	if g.chef.OfferSwap() {
+		//g.showSwapOfferDialog(parent)
 		return
 	}
 
-	offer := g.banker.CalculateOffer(remaining)
+	offer := g.chef.CalculateOffer(remaining)
 
 	// Show bonus value being applied if there is one
 	if g.bonus.HasPendingBonus() {
@@ -426,9 +504,33 @@ func (g *Game) proceedWithBankerOffer(parent fyne.Window, remaining []int) {
 
 		// Only show bonus dialog if there's actually a bonus description
 		if bonusMsg != "" {
-			d := dialog.NewInformation("🎁 Bonus Applied!",
-				fmt.Sprintf("%s\nOriginal Offer: $%d\nNew Offer: $%d", bonusMsg, originalOffer, offer),
-				parent)
+			// Show both original and new offer images
+			originalImgID := g.getOfferImageID(originalOffer)
+			newImgID := g.getOfferImageID(offer)
+
+			originalImg := loadImage(fmt.Sprintf("%d.jpg", originalImgID), 120, 120)
+			newImg := loadImage(fmt.Sprintf("%d.jpg", newImgID), 120, 120)
+
+			bonusContent := container.NewVBox(
+				widget.NewLabel(" Bonus Applied!"),
+				widget.NewLabel(bonusMsg),
+				widget.NewSeparator(),
+				container.NewHBox(
+					container.NewVBox(
+						widget.NewLabel("Original Offer:"),
+						container.NewCenter(originalImg),
+						widget.NewLabel(fmt.Sprintf("$%d", originalOffer)),
+					),
+					widget.NewLabel("  →  "),
+					container.NewVBox(
+						widget.NewLabel("New Offer:"),
+						container.NewCenter(newImg),
+						widget.NewLabel(fmt.Sprintf("$%d", offer)),
+					),
+				),
+			)
+
+			d := dialog.NewCustom("Bonus Applied!", "Continue", bonusContent, parent)
 			d.SetOnClosed(func() {
 				g.showOfferDialog(parent, offer)
 			})
@@ -442,8 +544,12 @@ func (g *Game) proceedWithBankerOffer(parent fyne.Window, remaining []int) {
 	}
 }
 
-// Helper function to show offer dialog with custom buttons
+// Helper function to show offer dialog with custom buttons and chef image
 func (g *Game) showOfferDialog(parent fyne.Window, offer int) {
+	// Get random chef image
+	chefImgID := g.chef.GetRandomChefImage()
+	chefImg := loadImage(fmt.Sprintf("%d.jpg", chefImgID), 200, 200)
+
 	// Create buttons with symbols
 	acceptBtn := widget.NewButton("✓ Accept", nil)
 	declineBtn := widget.NewButton("✗ Decline", nil)
@@ -452,12 +558,18 @@ func (g *Game) showOfferDialog(parent fyne.Window, offer int) {
 	acceptBtn.Importance = widget.HighImportance    // Blue
 	declineBtn.Importance = widget.MediumImportance // Grey
 
-	content := widget.NewLabel(fmt.Sprintf("💰 The Banker offers you: $%d\nMeal or No Meal?", offer))
+	content := widget.NewLabel(fmt.Sprintf("‍ The Chef offers you: $%d\nMeal or No Meal?", offer))
 	// Accept on LEFT, Decline on RIGHT
 	buttons := container.NewHBox(acceptBtn, declineBtn)
-	dialogContent := container.NewVBox(content, buttons)
 
-	dlg := dialog.NewCustomWithoutButtons("Banker's Offer", dialogContent, parent)
+	dialogContent := container.NewVBox(
+		container.NewCenter(chefImg),
+		widget.NewSeparator(),
+		content,
+		buttons,
+	)
+
+	dlg := dialog.NewCustomWithoutButtons("Chef's Offer", dialogContent, parent)
 
 	// Accept button = take the deal
 	acceptBtn.OnTapped = func() {
@@ -587,14 +699,37 @@ func (g *Game) isValueOpened(val int) bool {
 }
 
 func (g *Game) showFinalReveal(parent fyne.Window) {
-	var msg string
+	var contentWidget fyne.CanvasObject
 	if g.itemNames[g.playerTray] != "" {
-		msg = fmt.Sprintf("🍽️ Your tray (Tray %d) contains: %s", g.playerTray+1, g.itemNames[g.playerTray])
+		foodImg := loadImage(fmt.Sprintf("%d.jpg", g.itemImages[g.playerTray]), 200, 200)
+		contentWidget = container.NewVBox(
+			widget.NewLabel(fmt.Sprintf("🍽️ Your tray (Tray %d) contains: %s", g.playerTray+1, g.itemNames[g.playerTray])),
+			widget.NewSeparator(),
+			container.NewCenter(foodImg),
+		)
+
 	} else {
-		msg = fmt.Sprintf("💰 Your tray (Tray %d) contains: $%d", g.playerTray+1, g.trayValues[g.playerTray])
+		// Show money value with image
+		valueIndex := -1
+		for i, v := range VALUES {
+			if v == g.trayValues[g.playerTray] {
+				valueIndex = i + 1
+				break
+			}
+		}
+
+		if valueIndex > 0 {
+			moneyImg := loadImage(fmt.Sprintf("%d.jpg", valueIndex), 200, 200)
+			label := widget.NewLabel(fmt.Sprintf("Your tray (Tray %d) contained:\n$%d", g.playerTray+1, g.trayValues[g.playerTray]))
+			contentWidget = container.NewVBox(
+				widget.NewSeparator(),
+				container.NewCenter(label),
+				container.NewCenter(moneyImg),
+			)
+		}
 	}
 
-	d := dialog.NewInformation("Final Reveal", msg, parent)
+	d := dialog.NewCustom("Final Reveal", "OK", contentWidget, parent)
 	d.SetOnClosed(func() {
 		for _, b := range g.gridButtons {
 			b.Disable()
@@ -659,14 +794,54 @@ func (g *Game) showPlayAgain(parent fyne.Window) {
 }
 
 func (g *Game) showDealAccepted(parent fyne.Window, offer int) {
-	var msg string
+	// Get random chef image for the accepted deal
+	chefImgID := g.chef.GetRandomChefImage()
+	chefImg := loadImage(fmt.Sprintf("%d.jpg", chefImgID), 200, 200)
+
+	var contentWidget fyne.CanvasObject
+
 	if g.itemNames[g.playerTray] != "" {
-		msg = fmt.Sprintf("💵 You accepted the deal: $%d\n🍽️ Your tray (Tray %d) contained: %s", offer, g.playerTray+1, g.itemNames[g.playerTray])
+		// Show food item with image
+		foodImg := loadImage(fmt.Sprintf("%d.jpg", g.itemImages[g.playerTray]), 200, 200)
+		label := widget.NewLabel(fmt.Sprintf(" Your tray (Tray %d) contained:\n%s", g.playerTray+1, g.itemNames[g.playerTray]))
+		contentWidget = container.NewVBox(
+			widget.NewLabel(fmt.Sprintf("You accepted the deal!\n️  Your reward:  %d", offer)),
+			container.NewCenter(chefImg),
+			widget.NewSeparator(),
+			container.NewCenter(label),
+			container.NewCenter(foodImg),
+		)
 	} else {
-		msg = fmt.Sprintf("💵 You accepted the deal: $%d\n💰 Your tray (Tray %d) contained: $%d", offer, g.playerTray+1, g.trayValues[g.playerTray])
+		// Show money value with image
+		valueIndex := -1
+		for i, v := range VALUES {
+			if v == g.trayValues[g.playerTray] {
+				valueIndex = i + 1
+				break
+			}
+		}
+
+		if valueIndex > 0 {
+			moneyImg := loadImage(fmt.Sprintf("%d.jpg", valueIndex), 200, 200)
+			label := widget.NewLabel(fmt.Sprintf("Your tray (Tray %d) contained:\n$%d", g.playerTray+1, g.trayValues[g.playerTray]))
+			contentWidget = container.NewVBox(
+				widget.NewLabel(fmt.Sprintf("You accepted the deal!\n️  Your reward:  %d", offer)),
+				container.NewCenter(chefImg),
+				widget.NewSeparator(),
+				container.NewCenter(label),
+				container.NewCenter(moneyImg),
+			)
+		} else {
+			contentWidget = container.NewVBox(
+				widget.NewLabel(fmt.Sprintf("You accepted the deal!\n️  Your reward:  %d", offer)),
+				container.NewCenter(chefImg),
+				widget.NewSeparator(),
+				widget.NewLabel(fmt.Sprintf("Your tray (Tray %d) contained:\n$%d", g.playerTray+1, g.trayValues[g.playerTray])),
+			)
+		}
 	}
 
-	d := dialog.NewInformation("Game Over - Deal Accepted!", msg, parent)
+	d := dialog.NewCustom("Game Over - Deal Accepted!", "OK", contentWidget, parent)
 	d.SetOnClosed(func() {
 		for _, b := range g.gridButtons {
 			b.Disable()
