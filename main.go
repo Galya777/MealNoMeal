@@ -428,6 +428,9 @@ func (g *Game) showChefOffer(parent fyne.Window) {
 		// Decline button = don't swap
 		declineBtn.OnTapped = func() {
 			dlg.Hide()
+			if g.getUnopenedCount() == 1 {
+				g.showFinalReveal(parent)
+			}
 		}
 
 		dlg.Show()
@@ -563,6 +566,9 @@ func (g *Game) showOfferDialog(parent fyne.Window, offer int) {
 	// Decline button = continue playing
 	declineBtn.OnTapped = func() {
 		dlg.Hide()
+		if g.getUnopenedCount() == 1 {
+			g.showFinalReveal(parent)
+		}
 	}
 
 	dlg.Show()
