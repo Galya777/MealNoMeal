@@ -55,7 +55,7 @@ func NewGame() *Game {
 }
 
 // Helper function to load image from file with better error handling
-func loadImageSafe(filename string, width, height float32) fyne.CanvasObject {
+func loadImage(filename string, width, height float32) fyne.CanvasObject {
 	uri := storage.NewFileURI("images/" + filename)
 	img := canvas.NewImageFromURI(uri)
 
@@ -65,15 +65,6 @@ func loadImageSafe(filename string, width, height float32) fyne.CanvasObject {
 		return widget.NewLabel(fmt.Sprintf("Image: %s", filename))
 	}
 
-	img.FillMode = canvas.ImageFillContain
-	img.SetMinSize(fyne.NewSize(width, height))
-	return img
-}
-
-// Update the old loadImage function to use the safe version
-func loadImage(filename string, width, height float32) *canvas.Image {
-	uri := storage.NewFileURI("images/" + filename)
-	img := canvas.NewImageFromURI(uri)
 	img.FillMode = canvas.ImageFillContain
 	img.SetMinSize(fyne.NewSize(width, height))
 	return img
@@ -329,11 +320,8 @@ func (g *Game) showTrayOpenedDialog(parent fyne.Window, idx int) {
 		g.markPriceAsOpened(idx)
 
 		// Check if it's time for chef offer (every 3 trays)
-		if g.openedTraysCount%3 == 0 {
+		if g.openedTraysCount%3 == 0 || g.getUnopenedCount() == 1 {
 			g.showChefOffer(parent)
-		} else if g.getUnopenedCount() == 1 {
-			// final reveal when 1 left (not including player's tray)
-			g.showFinalReveal(parent)
 		}
 	})
 	d.Show()
@@ -389,11 +377,6 @@ func (g *Game) getUnopenedCount() int {
 }
 
 func (g *Game) showChefOffer(parent fyne.Window) {
-	// Check if final reveal
-	if g.getUnopenedCount() == 1 {
-		g.showFinalReveal(parent)
-		return
-	}
 	remaining := []int{}
 	// Include player's tray in remaining values
 	for i := 0; i < NUM_TRAYS; i++ {
